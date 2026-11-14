@@ -466,7 +466,7 @@
 
 
 
-  <view class="stress-editor-mask" wx:if="{{showStressEditor}}" catchtap="closeStressEditor">
+  <view class="stress-editor-mask" wx:if="{{showStressEditor}}" catchtap="closeStressEditor" catchtouchmove="noop">
     <view class="stress-editor-panel" catchtap="noop">
       <view class="stress-editor-head">
         <view>
@@ -500,7 +500,7 @@
     </view>
   </view>
 
-  <view class="stress-editor-mask" wx:if="{{showAlertEditor}}" catchtap="closeAlertEditor">
+  <view class="stress-editor-mask" wx:if="{{showAlertEditor}}" catchtap="closeAlertEditor" catchtouchmove="noop">
     <view class="stress-editor-panel alert-editor-panel" catchtap="noop">
       <view class="stress-editor-head">
         <view>
@@ -541,7 +541,7 @@
     </view>
   </view>
 
-  <view class="stress-editor-mask" wx:if="{{showGoalEditor}}" catchtap="closeGoalEditor">
+  <view class="stress-editor-mask" wx:if="{{showGoalEditor}}" catchtap="closeGoalEditor" catchtouchmove="noop">
     <view class="stress-editor-panel goal-editor-panel" catchtap="noop">
       <view class="stress-editor-head">
         <view>

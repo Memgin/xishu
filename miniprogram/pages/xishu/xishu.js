@@ -16,9 +16,10 @@ const STORAGE_KEY = 'XISHU_ASSETS_V1';
 const LEGACY_STORAGE_KEY = 'YOUSHU_ASSETS_V3';
 const LOCAL_AI_KEY_STORAGE = 'SILICONFLOW_API_KEY';
 const RECENT_ICON_STORAGE_KEY = 'XISHU_RECENT_ICONS_V1';
+const ICON_PATH_CACHE_KEY = 'XISHU_ICON_PATH_CACHE_V1';
+const ICON_PATH_CACHE_LIMIT = 120;
 const GET_XISHU_ASSETS_FN = 'getXishuAssets';
 const SYNC_XISHU_ASSETS_FN = 'syncXishuAssets';
-const TEMP_FALLBACK_AI_KEY = 'sk-mawvwwscqojwzibuscyhkyooyitszaxfvykfeuodpmzmliwm';
 const PULL_DOWN_LOADING_TEXT = '全量同步中...';
 const PULL_DOWN_SUCCESS_TEXT = '同步成功';
 const PULL_DOWN_FAIL_TEXT = '刷新延迟';
@@ -164,6 +165,7 @@ Page({
     this.assetTapTimer = null;
     this.lastTapAssetId = '';
     this.lastTapAt = 0;
+    this.iconPrefetching = false;
     this.loadAssets();
     this.loadRecentIcons();
     this.ensureExchangeRates(false);
@@ -286,6 +288,131 @@ Page({
     const merged = [incoming, ...current.filter((icon) => icon.path !== incoming.path)].slice(0, 12);
     this.setData({ recentIconItems: merged });
     wx.setStorageSync(RECENT_ICON_STORAGE_KEY, merged);
+  },
+
+  getIconPathCache() {
+    const cache = wx.getStorageSync(ICON_PATH_CACHE_KEY) || {};
+    return cache && typeof cache === 'object' ? cache : {};
+  },
+
+  saveIconPathCache(cacheMap) {
+    if (!cacheMap || typeof cacheMap !== 'object') return;
+    const entries = Object.entries(cacheMap)
+      .map(([remote, item]) => ({
+        remote,
+        localPath: item && item.localPath ? String(item.localPath) : '',
+        updatedAt: Number(item && item.updatedAt) || 0
+      }))
+      .filter((item) => item.remote && item.localPath)
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, ICON_PATH_CACHE_LIMIT);
+
+    const next = {};
+    entries.forEach((item) => {
+      next[item.remote] = {
+        localPath: item.localPath,
+        updatedAt: item.updatedAt || Date.now()
+      };
+    });
+    wx.setStorageSync(ICON_PATH_CACHE_KEY, next);
+  },
+
+  isRemoteIconPath(path) {
+    return /^https?:\/\//i.test(String(path || '').trim());
+  },
+
+  getCachedLocalIconPath(remotePath) {
+    if (!this.isRemoteIconPath(remotePath)) return '';
+    const cache = this.getIconPathCache();
+    const entry = cache[String(remotePath)] || null;
+    return entry && entry.localPath ? String(entry.localPath) : '';
+  },
+
+  resolveIconDisplayPath(path) {
+    const sourcePath = String(path || '').trim();
+    if (!sourcePath) return '';
+    if (!this.isRemoteIconPath(sourcePath)) return sourcePath;
+    const cachedLocal = this.getCachedLocalIconPath(sourcePath);
+    return cachedLocal || sourcePath;
+  },
+
+  cacheRemoteIconPath(remotePath) {
+    const sourcePath = String(remotePath || '').trim();
+    if (!this.isRemoteIconPath(sourcePath)) {
+      return Promise.resolve(sourcePath);
+    }
+
+    const cachedLocal = this.getCachedLocalIconPath(sourcePath);
+    if (cachedLocal) {
+      return Promise.resolve(cachedLocal);
+    }
+
+    return new Promise((resolve) => {
+      wx.downloadFile({
+        url: sourcePath,
+        success: (downloadRes) => {
+          if (!downloadRes || downloadRes.statusCode !== 200 || !downloadRes.tempFilePath) {
+            resolve(sourcePath);
+            return;
+          }
+
+          wx.saveFile({
+            tempFilePath: downloadRes.tempFilePath,
+            success: ({ savedFilePath }) => {
+              const localPath = savedFilePath || downloadRes.tempFilePath;
+              const cache = this.getIconPathCache();
+              cache[sourcePath] = {
+                localPath,
+                updatedAt: Date.now()
+              };
+              this.saveIconPathCache(cache);
+              resolve(localPath);
+            },
+            fail: () => {
+              const cache = this.getIconPathCache();
+              cache[sourcePath] = {
+                localPath: downloadRes.tempFilePath,
+                updatedAt: Date.now()
+              };
+              this.saveIconPathCache(cache);
+              resolve(downloadRes.tempFilePath);
+            }
+          });
+        },
+        fail: () => resolve(sourcePath)
+      });
+    });
+  },
+
+  warmupAssetIconCache(rawAssets) {
+    if (this.iconPrefetching) return;
+    const sourceAssets = Array.isArray(rawAssets) ? rawAssets : [];
+    const remotePaths = Array.from(new Set(sourceAssets
+      .filter((item) => item && item.iconType === 'image')
+      .map((item) => String(item.iconImageSourcePath || item.iconImagePath || '').trim())
+      .filter((path) => this.isRemoteIconPath(path))));
+
+    const uncachedPaths = remotePaths.filter((path) => !this.getCachedLocalIconPath(path));
+    if (!uncachedPaths.length) return;
+
+    this.iconPrefetching = true;
+    const targetPaths = uncachedPaths.slice(0, 18);
+
+    (async () => {
+      let successCount = 0;
+      for (const path of targetPaths) {
+        const localPath = await this.cacheRemoteIconPath(path);
+        if (localPath && localPath !== path) {
+          successCount += 1;
+        }
+      }
+      this.iconPrefetching = false;
+      if (successCount > 0) {
+        this.loadAssets();
+      }
+    })().catch(() => {
+      this.iconPrefetching = false;
+    });
   },
 
   onUnload() {
@@ -565,6 +692,7 @@ Page({
 
   normalizeAssets(rawAssets) {
     return rawAssets.map((item) => {
+      const iconImageSourcePath = String(item.iconImageSourcePath || item.iconImagePath || '').trim();
       const price = this.parseNumber(item.price);
       const priceCurrencyCode = String(item.priceCurrencyCode || 'CNY').toUpperCase();
       const priceRate = this.parseNumber(item.priceRate) || 1;
@@ -614,7 +742,8 @@ Page({
         noteImagePath: item.noteImagePath || '',
         iconType: item.iconType || 'emoji',
         iconEmoji: item.iconEmoji || this.getDefaultIconByType(item.type || 'asset'),
-        iconImagePath: item.iconImagePath || '',
+        iconImagePath: this.resolveIconDisplayPath(iconImageSourcePath),
+        iconImageSourcePath,
         category: item.category || '全部',
         costMode,
         relatedList,
@@ -751,6 +880,7 @@ Page({
     this.setData({ assets });
     this.computeOverview(assets);
     this.rebuildViewAssets();
+    this.warmupAssetIconCache(rawAssets);
   },
 
   buildRawAssets(assets) {
@@ -768,7 +898,7 @@ Page({
       noteImagePath: item.noteImagePath || '',
       iconType: item.iconType || 'emoji',
       iconEmoji: item.iconEmoji || this.getDefaultIconByType(item.type || 'asset'),
-      iconImagePath: item.iconImagePath || '',
+      iconImagePath: item.iconImageSourcePath || item.iconImagePath || '',
       category: item.category,
       costMode: this.normalizeCostMode(item.costMode),
       relatedList: (item.relatedList || []).map((rel) => ({
@@ -816,6 +946,7 @@ Page({
           this.computeOverview(assets);
           this.rebuildViewAssets();
         });
+        this.warmupAssetIconCache(cloudAssets);
         this.setCloudSyncHint('synced', '已从云端同步');
         return;
       }
@@ -975,7 +1106,7 @@ Page({
           // 1. 读取图片转换为 Base64
           const fs = wx.getFileSystemManager();
           const base64Data = fs.readFileSync(parseImagePath, 'base64');
-          const localApiKey = wx.getStorageSync(LOCAL_AI_KEY_STORAGE) || TEMP_FALLBACK_AI_KEY;
+          const localApiKey = wx.getStorageSync(LOCAL_AI_KEY_STORAGE);
           if (!localApiKey) {
             wx.hideLoading();
             wx.showModal({
@@ -1414,7 +1545,7 @@ Page({
       return;
     }
 
-    const localApiKey = wx.getStorageSync(LOCAL_AI_KEY_STORAGE) || TEMP_FALLBACK_AI_KEY;
+    const localApiKey = wx.getStorageSync(LOCAL_AI_KEY_STORAGE);
     if (!localApiKey) {
       wx.showModal({
         title: '缺少 API Key',
@@ -1493,7 +1624,7 @@ Page({
     if (!detail) return;
 
     // Check if API KEY is set
-    const localApiKey = wx.getStorageSync(LOCAL_AI_KEY_STORAGE) || TEMP_FALLBACK_AI_KEY;
+    const localApiKey = wx.getStorageSync(LOCAL_AI_KEY_STORAGE);
     if (!localApiKey) {
       wx.showModal({
         title: '缺少 API Key',
@@ -1634,7 +1765,7 @@ Page({
       selectedPriceCurrencyName: found.priceCurrencyName || '人民币',
       formIconType: found.iconType || 'emoji',
       formIconEmoji: found.iconEmoji || this.getDefaultIconByType(found.type || 'asset'),
-      formIconImagePath: found.iconImagePath || '',
+      formIconImagePath: found.iconImageSourcePath || found.iconImagePath || '',
       noteImagePath: found.noteImagePath || '',
       activeCostMode: this.normalizeCostMode(found.costMode),
       relatedList: this.normalizeRelatedItems(found.relatedList || []),

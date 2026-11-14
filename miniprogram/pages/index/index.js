@@ -299,7 +299,37 @@ Page({
     });
   },
 
+  setCustomTabBarVisible(visible) {
+    if (!this.getTabBar) return;
+    const tabBar = this.getTabBar();
+    if (!tabBar) return;
+
+    if (visible) {
+      if (typeof tabBar.show === 'function') {
+        tabBar.show();
+      } else if (tabBar.setData) {
+        tabBar.setData({ hidden: false });
+      }
+      return;
+    }
+
+    if (typeof tabBar.hide === 'function') {
+      tabBar.hide();
+    } else if (tabBar.setData) {
+      tabBar.setData({ hidden: true });
+    }
+  },
+
+  isAnyModalVisible(state = this.data) {
+    return !!(state.showGoalEditor || state.showAlertEditor || state.showStressEditor);
+  },
+
+  syncTabBarVisibilityByModalState() {
+    this.setCustomTabBarVisible(!this.isAnyModalVisible());
+  },
+
   onShow() {
+    this.syncTabBarVisibilityByModalState();
     this.syncCustomTabBar();
     this.closeAllDelete();
     this.syncStressStateFromGlobal();
@@ -546,7 +576,17 @@ Page({
       if (inferRes.result?.success) {
         const r = inferRes.result;
         const expectedPct = Number(r.expected_change_pct || 0);
-        const direction = expectedPct >= 0 ? '上涨' : '下跌';
+        const expectedDirection = r.expected_direction === 'up'
+          ? '上涨'
+          : r.expected_direction === 'down'
+            ? '下跌'
+            : '持平';
+        const lastChangePct = Number(r.last_change_pct || 0);
+        const lastDirection = r.last_direction === 'up'
+          ? '上涨'
+          : r.last_direction === 'down'
+            ? '下跌'
+            : '持平';
         const riskMap = { low: '低', medium: '中', high: '高' };
         const riskLabel = riskMap[r.risk_level] || '未知';
         const sourceMap = {
@@ -566,7 +606,8 @@ Page({
           content:
             `当前价：${Number(r.current || 0).toFixed(4)}\n` +
             `预测下一价：${Number(r.pred || 0).toFixed(4)}\n` +
-            `预期变动：${direction} ${Math.abs(expectedPct).toFixed(2)}%\n` +
+            `近一日变动：${lastDirection} ${Math.abs(lastChangePct).toFixed(4)}%\n` +
+            `预期变动：${expectedDirection} ${Math.abs(expectedPct).toFixed(4)}%\n` +
             `波动率(年化)：${(Number(r.volatility || 0) * 100).toFixed(2)}%\n` +
             `风险等级：${riskLabel}\n` +
             `信号：${r.signal || 'unknown'}\n` +
@@ -1226,20 +1267,91 @@ Page({
 
   buildAICapabilityPanel() {
     const xishuAssets = wx.getStorageSync('XISHU_ASSETS_V1') || [];
-    const xishuAssetCount = (Array.isArray(xishuAssets) ? xishuAssets : []).filter((item) => item && item.type === 'asset').length;
+    const assetRecords = Array.isArray(xishuAssets) ? xishuAssets : [];
+    const xishuAssetCount = assetRecords.filter((item) => item && item.type === 'asset').length;
+    const xishuWishCount = assetRecords.filter((item) => item && item.type === 'wish').length;
+    const rateCount = (this.data.selectedRateList || []).length;
+    const hasRecentMonitor = !!this.data.lastAIMonitorAt;
+    const savedScenarioCount = (this.data.savedStressScenarios || []).length;
+    const hasStressResult = !!this.data.stressResult;
+    const riskSeriesCount = this.data.latestRiskSummary && this.data.latestRiskSummary.portfolioSeries
+      && Array.isArray(this.data.latestRiskSummary.portfolioSeries.values)
+      ? this.data.latestRiskSummary.portfolioSeries.values.length
+      : 0;
+    const riskSignalCount = this.data.latestRiskSummary && Array.isArray(this.data.latestRiskSummary.signals)
+      ? this.data.latestRiskSummary.signals.length
+      : 0;
+    const adviceInsightCount = this.data.latestAdvice && Array.isArray(this.data.latestAdvice.insights)
+      ? this.data.latestAdvice.insights.length
+      : 0;
+    const adviceActionCount = this.data.latestAdvice && Array.isArray(this.data.latestAdvice.actions)
+      ? this.data.latestAdvice.actions.length
+      : 0;
+    const clampScore = (value) => {
+      const num = Number(value || 0);
+      if (!Number.isFinite(num)) return 0;
+      return Math.max(0, Math.min(100, Math.round(num)));
+    };
+
+    const fxMonitorScore = (() => {
+      if (rateCount <= 0) return 0;
+      let score = Math.min(60, rateCount * 12);
+      if (hasRecentMonitor) score += 20;
+      if (this.data.selectedRiskFocusCode) score += 10;
+      if ((this.data.alertRules || []).length > 0) score += 10;
+      return clampScore(score);
+    })();
+
+    const riskRadarScore = (() => {
+      if (!this.data.latestRiskSummary) return 0;
+      let score = 55;
+      score += Math.min(25, riskSeriesCount * 0.8);
+      score += Math.min(10, riskSignalCount * 2);
+      if ((this.data.latestRiskSummary.riskContributions || []).length > 0) score += 10;
+      return clampScore(score);
+    })();
+
+    const stressEngineScore = (() => {
+      if (!hasStressResult && savedScenarioCount <= 0) return 0;
+      let score = Math.min(45, savedScenarioCount * 12);
+      if (hasStressResult) score += 45;
+      if (hasStressResult && (this.data.stressResult.topImpacts || []).length > 0) score += 10;
+      return clampScore(score);
+    })();
+
+    const adviceScore = (() => {
+      if (!this.data.latestAdvice) return 0;
+      let score = 50;
+      score += Math.min(25, adviceInsightCount * 8);
+      score += Math.min(15, adviceActionCount * 7);
+      if (this.data.latestRiskSummary) score += 5;
+      if (hasStressResult) score += 5;
+      return clampScore(score);
+    })();
+
+    const assetIntelligenceScore = (() => {
+      if (xishuAssetCount <= 0) return 0;
+      let score = Math.min(70, xishuAssetCount * 8);
+      score += Math.min(15, xishuWishCount * 5);
+      if (xishuAssetCount >= 6) score += 10;
+      return clampScore(score);
+    })();
+
     const modules = [
       {
         key: 'fx-monitor',
         name: '汇率波动监测',
-        ready: this.data.selectedRateList.length > 0,
+        score: fxMonitorScore,
+        ready: fxMonitorScore >= 60,
         detail: this.data.lastAIMonitorAt
           ? `最近监测 ${this.data.lastAIMonitorCode || '-'} · ${this.data.lastAIMonitorAt}`
-          : `可监测币种 ${this.data.selectedRateList.length} 个`
+          : `可监测币种 ${rateCount} 个`
       },
       {
         key: 'risk-radar',
         name: '风险雷达 VaR',
-        ready: !!this.data.latestRiskSummary,
+        score: riskRadarScore,
+        ready: riskRadarScore >= 60,
         detail: this.data.latestRiskSummary
           ? `VaR95 ${this.data.latestRiskSummary.var95Text}`
           : '等待风险分析结果'
@@ -1247,15 +1359,17 @@ Page({
       {
         key: 'stress-engine',
         name: '压力测试引擎',
-        ready: !!this.data.stressResult || (this.data.savedStressScenarios || []).length > 0,
+        score: stressEngineScore,
+        ready: stressEngineScore >= 60,
         detail: this.data.stressResult
           ? `最近场景 ${this.data.stressResult.scenarioName}`
-          : `已保存场景 ${(this.data.savedStressScenarios || []).length} 个`
+          : `已保存场景 ${savedScenarioCount} 个`
       },
       {
         key: 'portfolio-advice',
         name: '组合建议生成',
-        ready: !!this.data.latestAdvice,
+        score: adviceScore,
+        ready: adviceScore >= 60,
         detail: this.data.latestAdvice
           ? `最近生成 ${this.data.latestAdvice.generatedAt || '刚刚'}`
           : '等待建议生成'
@@ -1263,19 +1377,32 @@ Page({
       {
         key: 'asset-intelligence',
         name: '悉数资产智能',
-        ready: xishuAssetCount > 0,
+        score: assetIntelligenceScore,
+        ready: assetIntelligenceScore >= 60,
         detail: xishuAssetCount > 0
           ? `已接入资产 ${xishuAssetCount} 条（含OCR/残值/回本分析）`
           : '悉数页录入资产后自动激活'
       }
     ];
+
+    const weights = {
+      'fx-monitor': 0.22,
+      'risk-radar': 0.24,
+      'stress-engine': 0.2,
+      'portfolio-advice': 0.18,
+      'asset-intelligence': 0.16
+    };
     const readyCount = modules.filter((item) => item.ready).length;
-    const score = Math.round((readyCount / Math.max(1, modules.length)) * 100);
+    const weightedScore = modules.reduce((sum, item) => {
+      const weight = weights[item.key] || 0;
+      return sum + (item.score || 0) * weight;
+    }, 0);
+    const score = clampScore(weightedScore);
     return {
       score,
       readyCount,
       totalCount: modules.length,
-      summaryText: `当前已激活 ${readyCount}/${modules.length} 个 AI 场景能力`,
+      summaryText: `当前能力成熟度 ${score} 分，已稳定激活 ${readyCount}/${modules.length} 个 AI 场景能力`,
       modules
     };
   },
@@ -1642,6 +1769,8 @@ Page({
       alertEditorDirectionIndex: directionIndex < 0 ? 0 : directionIndex,
       alertEditorThreshold: targetRule ? targetRule.thresholdText : '',
       alertEditorNote: targetRule ? targetRule.note : ''
+    }, () => {
+      this.syncTabBarVisibilityByModalState();
     });
   },
 
@@ -1653,6 +1782,8 @@ Page({
       alertEditorDirectionIndex: 0,
       alertEditorThreshold: '',
       alertEditorNote: ''
+    }, () => {
+      this.syncTabBarVisibilityByModalState();
     });
   },
 
@@ -1799,6 +1930,8 @@ Page({
       editingStressScenarioKey: '',
       stressEditorName: '',
       stressEditorRows: [this.createStressEditorRow()]
+    }, () => {
+      this.syncTabBarVisibilityByModalState();
     });
   },
 
@@ -1812,6 +1945,8 @@ Page({
       editingStressScenarioKey: scenario.key,
       stressEditorName: scenario.name,
       stressEditorRows: this.createStressEditorRowsFromScenario(scenario)
+    }, () => {
+      this.syncTabBarVisibilityByModalState();
     });
   },
 
@@ -1821,6 +1956,8 @@ Page({
       editingStressScenarioKey: '',
       stressEditorName: '',
       stressEditorRows: [this.createStressEditorRow()]
+    }, () => {
+      this.syncTabBarVisibilityByModalState();
     });
   },
 
@@ -1996,6 +2133,8 @@ Page({
       goalEditorRiskIndex,
       goalEditorSelectedCodes,
       goalCurrencyOptions: this.buildGoalCurrencyOptions(goalEditorSelectedCodes)
+    }, () => {
+      this.syncTabBarVisibilityByModalState();
     });
   },
 
@@ -2009,6 +2148,8 @@ Page({
       goalEditorRiskIndex: 1,
       goalEditorSelectedCodes: [],
       goalCurrencyOptions: this.buildGoalCurrencyOptions([])
+    }, () => {
+      this.syncTabBarVisibilityByModalState();
     });
   },
 

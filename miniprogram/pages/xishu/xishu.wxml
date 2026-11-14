@@ -92,7 +92,7 @@
     <view class="asset-item" wx:for="{{viewAssets}}" wx:key="id" data-id="{{item.id}}" bindtap="onTapAssetCard">
       <view class="asset-icon-wrap">
         <view class="asset-icon-box">
-          <image class="asset-icon-image" wx:if="{{item.iconType === 'image' && item.iconImagePath}}" src="{{item.iconImagePath}}" mode="aspectFill" />
+          <image class="asset-icon-image" wx:if="{{item.iconType === 'image' && item.iconImagePath}}" src="{{item.iconImagePath}}" mode="aspectFill" lazy-load="true" />
           <text class="asset-icon" wx:else>{{item.iconEmoji || (item.type === 'wish' ? '🎯' : '📦')}}</text>
         </view>
         <text class="asset-badge" wx:if="{{item.type === 'asset'}}">● {{item.statusText}}</text>
@@ -136,7 +136,7 @@
 
     <view class="detail-hero">
       <view class="detail-icon-wrap">
-        <image class="detail-icon-image" wx:if="{{detailItem.iconType === 'image' && detailItem.iconImagePath}}" src="{{detailItem.iconImagePath}}" mode="aspectFill" />
+        <image class="detail-icon-image" wx:if="{{detailItem.iconType === 'image' && detailItem.iconImagePath}}" src="{{detailItem.iconImagePath}}" mode="aspectFill" lazy-load="true" />
         <text class="detail-icon" wx:else>{{detailItem.iconEmoji || '📦'}}</text>
       </view>
       <text class="detail-name">{{detailItem.name}}</text>
@@ -360,7 +360,7 @@
         </view>
         <view class="editor-avatar-wrap">
           <view class="editor-avatar">
-            <image class="editor-avatar-image" wx:if="{{formIconType === 'image' && formIconImagePath}}" src="{{formIconImagePath}}" mode="aspectFill" />
+            <image class="editor-avatar-image" wx:if="{{formIconType === 'image' && formIconImagePath}}" src="{{formIconImagePath}}" mode="aspectFill" lazy-load="true" />
             <text wx:else>{{formIconEmoji || (editorTab === 'asset' ? '📦' : '🎯')}}</text>
           </view>
           <view class="icon-edit-fab" bindtap="onTapIconEdit">✎</view>
@@ -644,7 +644,7 @@
             bindtap="onPickLibraryIcon"
           >
             <view class="icon-grid-thumb-wrap">
-              <image class="icon-grid-thumb" src="{{item.path}}" mode="aspectFit" binderror="onIconGridImageError" data-index="{{index}}" />
+              <image class="icon-grid-thumb" src="{{item.path}}" mode="aspectFit" lazy-load="true" binderror="onIconGridImageError" data-index="{{index}}" />
             </view>
             <text class="icon-grid-name">{{item.name}}</text>
           </view>

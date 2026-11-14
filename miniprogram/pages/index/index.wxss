@@ -572,11 +572,16 @@
 
 .empty-workspace {
   margin-top: 28rpx;
+  margin-bottom: 30rpx;
   padding: 42rpx 32rpx;
   text-align: center;
   background:
     radial-gradient(circle at top right, rgba(37, 99, 235, 0.12), transparent 28%),
     rgba(255, 255, 255, 0.94);
+}
+
+.empty-workspace + .rate-card {
+  margin-top: 10rpx;
 }
 
 .empty-workspace-badge {

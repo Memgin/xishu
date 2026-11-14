@@ -11,13 +11,13 @@ Component({
     list: [
       {
         pagePath: 'pages/index/index',
-        text: '工具',
+        text: '悉数',
         iconPath: '/images/icons/home.png',
         selectedIconPath: '/images/icons/home-active.png'
       },
       {
         pagePath: 'pages/xishu/xishu',
-        text: '悉数',
+        text: '工具',
         iconPath: '/images/icons/business.png',
         selectedIconPath: '/images/icons/business-active.png'
       }

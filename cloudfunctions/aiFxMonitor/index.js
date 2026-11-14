@@ -44,6 +44,12 @@ function scoreRisk(volatility, expectedChangePct) {
   return { riskLevel, signal };
 }
 
+function resolveDirection(changePct, flatThreshold = 0.0005) {
+  const value = Number(changePct || 0);
+  if (Math.abs(value) <= flatThreshold) return 'flat';
+  return value > 0 ? 'up' : 'down';
+}
+
 function fetchJson(url, timeout = 1200) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, { timeout }, (res) => {
@@ -142,6 +148,12 @@ exports.main = async (event) => {
     const expectedChangePct = nowPrice > 0
       ? Number((((pred - nowPrice) / nowPrice) * 100).toFixed(4))
       : 0;
+    const prevPrice = prices.length > 1 ? Number(prices[prices.length - 2]) : NaN;
+    const lastChangePct = Number.isFinite(prevPrice) && prevPrice > 0
+      ? Number((((nowPrice - prevPrice) / prevPrice) * 100).toFixed(4))
+      : 0;
+    const expectedDirection = resolveDirection(expectedChangePct);
+    const lastDirection = resolveDirection(lastChangePct);
 
     const { riskLevel, signal } = scoreRisk(volatility, expectedChangePct);
 
@@ -153,6 +165,9 @@ exports.main = async (event) => {
       current: nowPrice,
       pred,
       expected_change_pct: expectedChangePct,
+      expected_direction: expectedDirection,
+      last_change_pct: lastChangePct,
+      last_direction: lastDirection,
       volatility,
       risk_level: riskLevel,
       signal,

@@ -45,7 +45,7 @@
     "disableSWC": true
   },
   "appid": "wx3a15af8de5b9d10b",
-  "projectname": "quickstart-wx-cloud",
+  "projectname": "xishu",
   "libVersion": "2.20.1",
   "cloudfunctionTemplateRoot": "cloudfunctionTemplate/",
   "condition": {
